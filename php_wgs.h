@@ -48,24 +48,17 @@ ZEND_BEGIN_MODULE_GLOBALS(wgs)
 ZEND_END_MODULE_GLOBALS(wgs)
 */
 
-/* In every utility function you add that needs to use variables 
-   in php_wgs_globals, call TSRMLS_FETCH(); after declaring other 
-   variables used by that function, or better yet, pass in TSRMLS_CC
-   after the last function argument and declare your utility function
-   with TSRMLS_DC after the last declared argument.  Always refer to
-   the globals in your function as WGS_G(variable).  You are 
-   encouraged to rename these macros something shorter, see
-   examples in any other php module directory.
-*/
+#define PI            3.1415926535
+#define EARTH_RADIUS  6378.137
 
 #ifdef ZTS
 #define WGS_G(v) TSRMG(wgs_globals_id, zend_wgs_globals *, v)
 #else
 #define WGS_G(v) (wgs_globals.v)
 #endif
-
+PHP_FUNCTION(wgs_geohash);
+PHP_FUNCTION(wgs_distance);
 #endif	/* PHP_WGS_H */
-
 
 /*
  * Local variables:

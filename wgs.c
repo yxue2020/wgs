@@ -32,56 +32,123 @@ ZEND_DECLARE_MODULE_GLOBALS(wgs)
 */
 
 /* True global resources - no need for thread safety here */
-static int le_wgs;
+static char bits[5] = {16, 8, 4, 2, 1};
+static char base32_map[32] = "0123456789bcdefghjkmnpqrstuvwxyz";
 
-/* {{{ PHP_INI
+static double rad(double d) { return d * PI / 180.0; }
+
+/**
+ * 计算两个坐标的球面距离
+ * wgs_distance(double lat1, double lng1, double lat2, double lng2);
+ * 
+ * @lat1    dobule  坐标A纬度
+ * @lng1    double  坐标A经度
+ * @lat2    dobule  坐标B纬度
+ * @lng2    double  坐标B经度
+ * return:  成功返回AB之间的球面距离, 错误返回NULL
  */
-/* Remove comments and fill if you need to have entries in php.ini
-PHP_INI_BEGIN()
-    STD_PHP_INI_ENTRY("wgs.global_value",      "42", PHP_INI_ALL, OnUpdateLong, global_value, zend_wgs_globals, wgs_globals)
-    STD_PHP_INI_ENTRY("wgs.global_string", "foobar", PHP_INI_ALL, OnUpdateString, global_string, zend_wgs_globals, wgs_globals)
-PHP_INI_END()
-*/
-/* }}} */
-
-/* Remove the following function when you have successfully modified config.m4
-   so that your module can be compiled into PHP, it exists only for testing
-   purposes. */
-
-/* Every user-visible function in PHP should document itself in the source */
-/* {{{ proto string confirm_wgs_compiled(string arg)
-   Return a string to confirm that the module is compiled in */
-PHP_FUNCTION(confirm_wgs_compiled)
+PHP_FUNCTION(wgs_distance)
 {
-	char *arg = NULL;
-	int arg_len, len;
-	char *strg;
+    double lat1, lat2, lng1, lng2;
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dddd", &lat1, &lng1, &lat2, &lng2) == FAILURE) {
+        return;
+    }
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &arg, &arg_len) == FAILURE) {
-		return;
-	}
+    if (lat1 < -90.0 || lat1 > 90.0 || lat2 < -90.0 || lat2 > 90.0) {
+        return;
+    }
 
-	len = spprintf(&strg, 0, "Congratulations! You have successfully modified ext/%.78s/config.m4. Module %.78s is now compiled into PHP.", "wgs", arg);
-	RETURN_STRINGL(strg, len, 0);
+    if (lng1 < -180.0 || lng1 > 180.0 || lng2 < -180.0 || lng2 > 180.0) {
+        return;
+    }
+
+    double radLat1 = rad(lat1);
+    double radLat2 = rad(lat2);
+    double a = radLat1 - radLat2;
+    double b = rad(lng1) - rad(lng2);
+    double s = 2 * asin(sqrt(pow(sin(a/2),2) + cos(radLat1)*cos(radLat2)*pow(sin(b/2),2)));
+
+    s = s * EARTH_RADIUS * 1000;
+    RETURN_DOUBLE(s);
 }
-/* }}} */
-/* The previous line is meant for vim and emacs, so it can correctly fold and 
-   unfold functions in source code. See the corresponding marks just before 
-   function definition, where the functions purpose is also documented. Please 
-   follow this convention for the convenience of others editing your code.
-*/
 
-
-/* {{{ php_wgs_init_globals
+/**
+ * 使用GeoHash对坐标编码
+ * geohash(double lat, double lng, [int precise])
+ * 
+ * @lat1        dobule  纬度
+ * @lng1        double  经度
+ * @precise     dobule  精准度, 默认12
+ * return: 成功返回GeoHash编码, 失败返回NULL
  */
-/* Uncomment this function if you have INI entries
-static void php_wgs_init_globals(zend_wgs_globals *wgs_globals)
+PHP_FUNCTION(wgs_geohash)
 {
-	wgs_globals->global_value = 0;
-	wgs_globals->global_string = NULL;
+    int precise = 12;
+    double lat, lng;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dd|l", &lat, &lng, &precise) == FAILURE) {
+        return;
+    }
+
+    if (lat < -90.0 || lat > 90.0) {
+        return;
+    }
+
+    if (lng < -180.0 || lng > 180.0) {
+        return;
+    }
+
+    double mid;
+    double lat_min = -90.0, lat_max = 90.0;
+    double lng_min = -180.0, lng_max = 180.0;
+
+    char *s = emalloc(sizeof(char) * (precise+1));
+    if (s == NULL) {
+        RETURN_NULL();
+    }
+
+    unsigned int ch = 0;
+    unsigned int bit = 0;
+
+    int i = 0;
+    int is_even = 1;
+    while (i < precise) {
+
+        if (is_even) {      // 纬度
+            mid = (lng_min + lng_max) / 2;
+            if (lng > mid) {
+                ch |= bits[bit];
+                lng_min = mid;
+            } else {
+                lng_max = mid;
+            }
+        } else {            // 经度
+            mid = (lat_min + lat_max) / 2;
+            if (lat > mid) {
+                ch |= bits[bit];
+                lat_min = mid;
+            } else {
+                lat_max = mid;
+            }
+        }
+
+        is_even = !is_even;
+
+        // 集齐5颗龙珠, 召唤神龙
+        if (bit < 4) {
+            bit++;
+        } else {
+            s[i] = base32_map[ch];
+            ch = 0;
+            bit = 0;
+            i++;
+        }
+    }
+
+    s[i] = '\0';
+
+    RETURN_STRINGL(s, precise, 0);
 }
-*/
-/* }}} */
 
 /* {{{ PHP_MINIT_FUNCTION
  */
@@ -142,7 +209,8 @@ PHP_MINFO_FUNCTION(wgs)
  * Every user visible function must have an entry in wgs_functions[].
  */
 const zend_function_entry wgs_functions[] = {
-	PHP_FE(confirm_wgs_compiled,	NULL)		/* For testing, remove later. */
+	PHP_FE(wgs_geohash,	NULL)		/* GeoHash编码. */
+    PHP_FE(wgs_distance, NULL)      /* 球面距离计算. */
 	PHP_FE_END	/* Must be the last line in wgs_functions[] */
 };
 /* }}} */
